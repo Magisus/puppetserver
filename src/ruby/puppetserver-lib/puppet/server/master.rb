@@ -77,15 +77,19 @@ class Puppet::Server::Master
 
   def compileCatalog(request_data)
     processed_hash = convert_java_args_to_ruby(request_data)
+    # We need an environment to talk to PDB
+    processed_hash['environment'] ||= 'production'
 
     facts, trusted_facts = process_facts(processed_hash)
     node_params = { facts: facts,
+                    # TODO: fetch environment from classifier
                     environment: processed_hash['environment'],
                     # Are these 'parameters' the same as what Node expects?
                     # There's a bunch of code in Node around merging additional things,
                     # notably facts, into the 'parameter' field. Is that necessary? If so,
                     # why?
                     parameters: processed_hash['parameters'],
+                    # TODO: fetch classes from classifier
                     classes: processed_hash['classes'] }
 
     node = Puppet::Node.new(processed_hash['certname'], node_params)
