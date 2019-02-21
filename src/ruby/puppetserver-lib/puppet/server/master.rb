@@ -9,6 +9,7 @@ require 'puppet/node/facts'
 require 'puppet/server/config'
 require 'puppet/server/puppet_config'
 require 'puppet/server/network/http/handler'
+require 'puppet/server/catalog'
 
 require 'java'
 
@@ -62,41 +63,8 @@ class Puppet::Server::Master
         response["X-Puppet-Version"])
   end
 
-  def convert_java_args_to_ruby(hash)
-    Hash[hash.collect do |key, value|
-        # Stolen and modified from params_to_ruby in handler.rb
-        newkey = key.to_s
-        newkey.slice!(0)
-        if value.java_kind_of?(Java::ClojureLang::PersistentArrayMap)
-          [newkey, convert_java_args_to_ruby(value)]
-        else
-          [newkey, value.java_kind_of?(Java::JavaUtil::List) ? value.to_a : value]
-        end
-      end]
-  end
-
   def compileCatalog(request_data)
-    processed_hash = convert_java_args_to_ruby(request_data)
-
-    facts, trusted_facts = process_facts(processed_hash)
-    node_params = { facts: facts,
-                    environment: processed_hash['environment'],
-                    # Are these 'parameters' the same as what Node expects?
-                    # There's a bunch of code in Node around merging additional things,
-                    # notably facts, into the 'parameter' field. Is that necessary? If so,
-                    # why?
-                    parameters: processed_hash['parameters'],
-                    classes: processed_hash['classes'] }
-
-    node = Puppet::Node.new(processed_hash['certname'], node_params)
-    # Merges facts into the node parameters.
-    # Ensures that facts will be surfaced as top-scope variables,
-    # along with other node parameters.
-    node.merge(facts.values)
-    node.trusted_data = trusted_facts
-    node.add_server_facts(@server_facts)
-    catalog = Puppet::Parser::Compiler.compile(node, processed_hash['job_id'])
-    catalog.to_data_hash
+    Puppet::Server::Catalog.compile(request_data, @server_facts)
   end
 
   def getClassInfoForEnvironment(env)
@@ -162,46 +130,12 @@ class Puppet::Server::Master
 
   private
 
-  # @return Puppet::Node::Facts facts, Hash trusted_facts
-  def process_facts(request_data)
-    if request_data['facts'].nil?
-      facts = get_facts_from_pdb(request_data['certname'], request_data['environment'])
-    else
-      facts_from_request = request_data['facts']
-      facts_from_request['name'] = request_data['certname']
-      facts = Puppet::Node::Facts.from_data_hash(facts_from_request)
-    end
-
-    fact_values = if facts.nil?
-                    {}
-                  else
-                    facts.sanitize
-                    facts.to_data_hash['values']
-                  end
-
-    # Pull the trusted facts from the request, or attempt to extract them from
-    # the facts hash
-    trusted_facts = if request_data['trusted_facts'].nil?
-                      fact_values['trusted'].nil? ? {} : fact_values['trusted']
-                    else
-                      request_data['trusted_facts']['values']
-                    end
-
-    return facts, trusted_facts
-  end
-
-  def get_facts_from_pdb(nodename, environment)
-    if Puppet[:storeconfigs_backend] == :puppetdb
-      Puppet::Node::Facts.indirection.find(nodename, :environment => environment)
-    else
-      # How should this be surfaced? Seems like we could maybe do better than a 500, unless
-      # that's accurate?
-      raise(Puppet::Error, "PuppetDB not configured, please provide facts with your catalog request.")
-    end
-  end
-
   # Initialize our server fact hash; we add these to each client, and they
   # won't change while we're running, so it's safe to cache the values.
+  #
+  # This is lifted directly from Puppet::Indirector::Catalog::Compiler,
+  # where it is used to configure and store this state on the terminus,
+  # which we aren't using.
   def set_server_facts
     @server_facts = {}
 
