@@ -183,7 +183,7 @@ class Puppet::Server::Master
     trusted_facts = if request_data['trusted_facts']
                       request_data['trusted_facts']['values']
                     else
-                      fact_values = facts ? facts.to_data_hash : {}
+                      fact_values = facts ? facts.to_data_hash['values'] : {}
                       fact_values['trusted'].nil? ? {} : fact_values['trusted']
                     end
 
