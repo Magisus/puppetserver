@@ -18,7 +18,7 @@ module Puppet::Server::Catalog
       end]
   end
 
-  def self.compile(request_data, server_facts)
+  def self.compile(request_data, server_facts, indirection_info)
     processed_hash = convert_java_args_to_ruby(request_data)
 
     node = create_node(processed_hash, server_facts)
@@ -118,4 +118,116 @@ module Puppet::Server::Catalog
     end
   end
 
+  def self.collect_termini(indirection)
+    # This has an analog within the indirection instance however it
+    # appears to be lazily populated, full information on all
+    # available termini are availble through
+    # `Puppet::Indirector::Terminus.terminus_classes(indirection)`
+    termini = {}
+    Puppet::Indirector::Terminus.terminus_classes(indirection).each do |term_name|
+      # The above returns an array of symbols similar to Indirection.instances
+      termini[term_name] =
+        Puppet::Indirector::Terminus.terminus_class(indirection, term_name)
+    end
+
+    termini
+  end
+
+  def self.find_terminus_class(indirection, terminus_name)
+    if terminus_name
+      terminus_class =
+        Puppet::Indirector::Terminus.terminus_class(indirection, terminus_name)
+    else
+      terminus_class = nil
+    end
+
+    terminus_class
+  end
+
+  def self.dereference_storeconfig_maybe(indirection, terminus_name, terminus_class)
+    if terminus_name == :store_configs
+      actual_name = Puppet.settings[:storeconfigs_backend]
+      actual_class =
+        Puppet::Indirector::Terminus.terminus_class(indirection,
+                                                    actual_name)
+    else
+      actual_name = terminus_name
+      actual_class = terminus_class
+    end
+
+    return actual_name, actual_class
+  end
+
+  def self.basic_indirection_info(indirection)
+    # The below is an instance of that indirected class, eg
+    # `Puppet::Node::Facts.new` which contains some information about
+    # its configuration
+    indirection_instance = Puppet::Indirector::Indirection.instance(indirection)
+    # An actual class ref of what will be indirected, eg `Puppet::Node::Facts`
+    indirected_class_reference = indirection_instance.model
+    # Symbol, eg :store_configs or may be `nil` (uncached)
+    # symbol can be used to look up class ref via
+    # `Terminus.terminus_class(:catalog, :store_configs)`
+    cache_terminus_name = indirection_instance.cache_class
+    # The symbol, eg :compiler that can be given to
+    # `Terminus.terminus_class` same as cache_class
+    # May be `nil`, if so terminus_setting should be consulted
+    primary_terminus_name = indirection_instance.terminus_class
+    # Where to find any configuration for what default terminus to use
+    # Will be a symbol that can be passed into `Puppet.setting[<here>]`
+    terminus_setting = indirection_instance.terminus_setting
+
+    return indirected_class_reference, cache_terminus_name,
+      primary_terminus_name, terminus_setting
+  end
+
+  def self.find_indirection_info
+    indirections = {}
+
+    # Returns an array of symbols for registered indirections, e.g. :facts
+    Puppet::Indirector::Indirection.instances.each do |indirection|
+
+      indirected_class_reference, cache_terminus_name,
+      primary_terminus_name, terminus_setting =
+        basic_indirection_info(indirection)
+
+      termini = collect_termini(indirection)
+
+      cache_terminus_class = find_terminus_class(indirection, cache_terminus_name)
+
+      actual_cache_name, actual_cache_class =
+        dereference_storeconfig_maybe(indirection,
+                                      cache_terminus_name,
+                                      cache_terminus_class)
+
+
+      primary_terminus_name ||= Puppet.settings[terminus_setting]
+
+      primary_terminus_class = find_terminus_class(indirection, primary_terminus_name)
+
+      actual_terminus_name, actual_terminus_class =
+        dereference_storeconfig_maybe(indirection,
+                                      primary_terminus_name,
+                                      primary_terminus_class)
+
+      indirections[indirection] = {
+        indirected_class: indirected_class_reference,
+
+        cache_terminus_name: cache_terminus_name,
+        actual_cache_name: actual_cache_name,
+        primary_terminus_name: primary_terminus_name,
+        actual_terminus_name: actual_terminus_name,
+
+        cache_terminus_class: cache_terminus_class,
+        actual_cache_class: actual_cache_class,
+        primary_terminus_class: primary_terminus_class,
+        actual_terminus_class: actual_terminus_class,
+
+        terminus_setting: terminus_setting,
+        termini: termini,
+      }
+    end
+
+    indirections
+  end
 end

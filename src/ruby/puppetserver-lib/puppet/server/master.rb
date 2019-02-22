@@ -38,6 +38,7 @@ class Puppet::Server::Master
     register([master_routes])
     @env_loader = Puppet.lookup(:environments)
     set_server_facts
+    @indirection_info = Puppet::Server::Catalog.find_indirection_info
   end
 
   def handleRequest(request)
@@ -64,7 +65,7 @@ class Puppet::Server::Master
   end
 
   def compileCatalog(request_data)
-    Puppet::Server::Catalog.compile(request_data, @server_facts)
+    Puppet::Server::Catalog.compile(request_data, @server_facts, @indirection_info)
   end
 
   def getClassInfoForEnvironment(env)
