@@ -161,7 +161,12 @@ namespace :spec do
       GEM_HOME='#{TEST_GEMS_DIR}' GEM_PATH='#{TEST_GEMS_DIR}' \
       #{LEIN_PATH} gem install -i '#{TEST_GEMS_DIR}' bundler -v '< 2' --no-document --source '#{GEM_SOURCE}'
       CMD
-      sh gem_install_bundler
+      begin
+        sh gem_install_bundler
+      rescue
+        # retry because of JRuby bug affecting Jenkins
+        sh gem_install_bundler
+      end
 
       path = ENV['PATH']
       ## Install gems via bundler
